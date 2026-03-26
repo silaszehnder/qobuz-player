@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO volume (volume) VALUES (?1);\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "ee6ef39ccc79ab3050a09b6b51a570f63033aeb2aeecd37b413348ed3c486dcd"
+}

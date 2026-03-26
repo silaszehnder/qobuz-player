@@ -10,8 +10,8 @@ use clap::{Parser, Subcommand};
 #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 use futures::executor::block_on;
 use qobuz_player_controls::{
-    AudioQuality, client::Client, database::Database, notification::NotificationBroadcast,
-    player::Player,
+    AudioQuality, client::Client, database::Database, lastfm::LastFm,
+    notification::NotificationBroadcast, player::Player,
 };
 #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 use qobuz_player_controls::{Status, StatusReceiver};
@@ -124,6 +124,18 @@ enum Commands {
         #[clap(long, default_value_t = false)]
         /// Disable sleep inhibitor
         disable_sleep_inhibitor: bool,
+
+        #[clap(long, default_value_t = false)]
+        /// Enable Last.fm scrobbling
+        lastfm: bool,
+
+        #[clap(long, env = "LASTFM_API_KEY")]
+        /// Last.fm API key (required for scrobbling)
+        lastfm_api_key: Option<String>,
+
+        #[clap(long, env = "LASTFM_API_SECRET")]
+        /// Last.fm API secret (required for scrobbling)
+        lastfm_api_secret: Option<String>,
     },
     /// Persist configurations
     Config {
@@ -149,6 +161,18 @@ pub enum ConfigCommands {
         #[clap(value_enum)]
         quality: AudioQuality,
     },
+    /// Authenticate with Last.fm for scrobbling
+    #[clap(value_parser)]
+    LastfmAuth {
+        /// Last.fm API key
+        #[clap(long, env = "LASTFM_API_KEY")]
+        api_key: String,
+        /// Last.fm API secret
+        #[clap(long, env = "LASTFM_API_SECRET")]
+        api_secret: String,
+    },
+    /// Clear Last.fm authentication
+    LastfmLogout,
 }
 
 #[derive(Debug, Snafu)]
@@ -252,6 +276,9 @@ pub async fn run() -> Result<(), Error> {
         disable_tui_album_cover: false,
         #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
         disable_sleep_inhibitor: false,
+        lastfm: false,
+        lastfm_api_key: None,
+        lastfm_api_secret: None,
     }) {
         Commands::Open {
             username,
@@ -278,6 +305,9 @@ pub async fn run() -> Result<(), Error> {
             disable_tui_album_cover,
             #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
             disable_sleep_inhibitor,
+            lastfm,
+            lastfm_api_key,
+            lastfm_api_secret,
         } => {
             let database_credentials = database.get_credentials().await?;
             let database_configuration = database.get_configuration().await?;
@@ -318,6 +348,35 @@ pub async fn run() -> Result<(), Error> {
 
             let client = Arc::new(Client::new(username, password, max_audio_quality.clone()));
 
+            // Initialize Last.fm if enabled
+            let lastfm_client = if lastfm {
+                match (lastfm_api_key, lastfm_api_secret) {
+                    (Some(api_key), Some(api_secret)) => {
+                        let lastfm_session = database.get_lastfm_session().await?;
+                        let lastfm = LastFm::new(api_key, api_secret, lastfm_session.session_key);
+                        if lastfm.is_authenticated() {
+                            tracing::info!(
+                                "Last.fm scrobbling enabled for user: {}",
+                                lastfm_session.username.unwrap_or_default()
+                            );
+                        } else {
+                            tracing::warn!(
+                                "Last.fm enabled but not authenticated. Run 'config lastfm-auth' to authenticate."
+                            );
+                        }
+                        Some(lastfm)
+                    }
+                    _ => {
+                        tracing::warn!(
+                            "Last.fm enabled but API key/secret not provided. Use --lastfm-api-key and --lastfm-api-secret or set LASTFM_API_KEY and LASTFM_API_SECRET environment variables."
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
             let broadcast = Arc::new(NotificationBroadcast::new());
             let mut player = Player::new(
                 tracklist,
@@ -329,6 +388,7 @@ pub async fn run() -> Result<(), Error> {
                 state_change_delay,
                 sample_rate_change_delay,
                 output_device_id,
+                lastfm_client,
             )?;
 
             if connect {
@@ -527,6 +587,47 @@ pub async fn run() -> Result<(), Error> {
 
                 println!("Max audio quality saved.");
 
+                Ok(())
+            }
+            ConfigCommands::LastfmAuth {
+                api_key,
+                api_secret,
+            } => {
+                let lastfm = LastFm::new(api_key, api_secret, None);
+
+                // Step 1: Get auth token
+                println!("Getting Last.fm authentication token...");
+                let token = lastfm.get_auth_token().await.map_err(|e| Error::PlayerError {
+                    error: e.to_string(),
+                })?;
+
+                // Step 2: Show auth URL
+                let auth_url = lastfm.get_auth_url(&token);
+                println!("\nPlease open this URL in your browser to authorize:");
+                println!("{}", auth_url);
+                println!("\nPress Enter after you've authorized the application...");
+
+                // Wait for user to press Enter
+                stdin().lines().next();
+
+                // Step 3: Get session
+                println!("Getting session...");
+                let (session_key, username) =
+                    lastfm.get_session(&token).await.map_err(|e| Error::PlayerError {
+                        error: e.to_string(),
+                    })?;
+
+                // Step 4: Save to database
+                database
+                    .set_lastfm_session(session_key, username.clone())
+                    .await?;
+
+                println!("Last.fm authentication successful! Logged in as: {}", username);
+                Ok(())
+            }
+            ConfigCommands::LastfmLogout => {
+                database.clear_lastfm_session().await?;
+                println!("Last.fm session cleared.");
                 Ok(())
             }
         },

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT OR IGNORE INTO lastfm (ROWID) VALUES (?1);\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "88bfa5384bf05bf4d1e6ed31392a85a18d3a861c94883ba401dc97f3abd595dc"
+}

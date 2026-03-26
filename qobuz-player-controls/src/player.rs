@@ -15,6 +15,7 @@ use crate::{
     controls::{ControlCommand, Controls, NewQueueItem},
     database::Database,
     downloader::{DownloadResult, Downloader},
+    lastfm::{LastFm, ScrobbleState},
     notification::{Notification, NotificationBroadcast},
     sink::QueryTrackResult,
     tracklist::{QueueItem, TracklistType},
@@ -47,6 +48,8 @@ pub struct Player {
     downloader: Downloader,
     state_change_delay: Option<Duration>,
     sample_rate_change_delay: Option<Duration>,
+    lastfm: Option<LastFm>,
+    scrobble_state: ScrobbleState,
 }
 
 impl Player {
@@ -61,6 +64,7 @@ impl Player {
         state_change_delay: Option<Duration>,
         sample_rate_change_delay: Option<Duration>,
         preferred_device_id: Option<String>,
+        lastfm: Option<LastFm>,
     ) -> AppResult<Self> {
         let (volume, volume_receiver) = watch::channel(volume);
         let sink = Sink::new(volume_receiver, preferred_device_id)?;
@@ -94,6 +98,8 @@ impl Player {
             downloader,
             state_change_delay,
             sample_rate_change_delay,
+            lastfm,
+            scrobble_state: ScrobbleState::new(),
         })
     }
 
@@ -202,11 +208,54 @@ impl Player {
                     false
                 }
             };
+        } else {
+            // Track is starting - update scrobble state and send now playing
+            self.scrobble_state.track_changed(track.id);
+            self.send_now_playing(track).await;
         }
         self.sink.play();
         self.set_target_status(Status::Playing);
 
         Ok(())
+    }
+
+    async fn send_now_playing(&mut self, track: &Track) {
+        if let Some(ref lastfm) = self.lastfm
+            && self.scrobble_state.should_send_now_playing(track.id)
+        {
+            if let Err(e) = lastfm.now_playing(track).await {
+                tracing::warn!("Failed to send Last.fm now playing: {}", e);
+            } else {
+                self.scrobble_state.mark_now_playing_sent();
+            }
+        }
+    }
+
+    async fn check_scrobble(&mut self) {
+        let Some(ref lastfm) = self.lastfm else {
+            return;
+        };
+
+        let tracklist = self.tracklist_rx.borrow();
+        let Some(track) = tracklist.current_track() else {
+            return;
+        };
+
+        let position_secs = self.sink.position().as_secs();
+        let track_id = track.id;
+        let duration_secs = track.duration_seconds;
+
+        if self
+            .scrobble_state
+            .should_scrobble(track_id, position_secs, duration_secs)
+        {
+            let timestamp = self.scrobble_state.start_timestamp();
+            if let Err(e) = lastfm.scrobble(track, timestamp).await {
+                tracing::warn!("Failed to scrobble to Last.fm: {}", e);
+            } else {
+                self.scrobble_state.mark_scrobbled();
+            }
+        }
     }
 
     async fn set_volume(&self, volume: f32) -> AppResult<()> {
@@ -536,6 +585,9 @@ impl Player {
         let position = self.sink.position();
         self.position.send(position)?;
 
+        // Check if we should scrobble
+        self.check_scrobble().await;
+
         let duration = self
             .tracklist_rx
             .borrow()
@@ -641,6 +693,10 @@ impl Player {
                         sleep(delay).await;
                     }
                     self.query_track(next_track, false).await?;
+                } else {
+                    // Track was already queued, update scrobble state for the new track
+                    self.scrobble_state.track_changed(next_track.id);
+                    self.send_now_playing(next_track).await;
                 }
             }
             None => {

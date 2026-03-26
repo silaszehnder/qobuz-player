@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE configuration\n            SET max_audio_quality=?1\n            WHERE ROWID = 1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "fae9dea5302fc2c874b7ac8aea5275d5f5b32d3eb5f0bba69f539c3504af326d"
+}

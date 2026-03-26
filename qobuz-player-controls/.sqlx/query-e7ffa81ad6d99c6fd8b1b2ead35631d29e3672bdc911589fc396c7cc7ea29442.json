@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO cache_entries (path, last_opened)\n                VALUES (?, ?)\n                ON CONFLICT(path) DO UPDATE SET\n                    path = excluded.path,\n                    last_opened = excluded.last_opened\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "e7ffa81ad6d99c6fd8b1b2ead35631d29e3672bdc911589fc396c7cc7ea29442"
+}

@@ -44,6 +44,7 @@ impl Database {
 
         create_credentials_row(&pool).await?;
         create_configuration(&pool).await?;
+        create_lastfm_row(&pool).await?;
 
         Ok(Self { pool })
     }
@@ -295,6 +296,50 @@ impl Database {
         .await
         .expect("infallible");
     }
+
+    pub async fn set_lastfm_session(
+        &self,
+        session_key: String,
+        username: String,
+    ) -> AppResult<()> {
+        sqlx::query!(
+            r#"
+            UPDATE lastfm
+            SET session_key=?1, username=?2
+            WHERE ROWID = 1
+            "#,
+            session_key,
+            username
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_lastfm_session(&self) -> AppResult<LastFmSession> {
+        Ok(sqlx::query_as!(
+            LastFmSession,
+            r#"
+            SELECT session_key, username FROM lastfm
+            WHERE ROWID = 1;
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    pub async fn clear_lastfm_session(&self) -> AppResult<()> {
+        sqlx::query!(
+            r#"
+            UPDATE lastfm
+            SET session_key=NULL, username=NULL
+            WHERE ROWID = 1
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -336,6 +381,11 @@ pub struct DatabaseConfiguration {
     pub max_audio_quality: i64,
 }
 
+pub struct LastFmSession {
+    pub session_key: Option<String>,
+    pub username: Option<String>,
+}
+
 #[derive(Debug, sqlx::FromRow, serde::Deserialize)]
 struct TracklistDb {
     tracklist: Json<Tracklist>,
@@ -365,6 +415,19 @@ async fn create_configuration(pool: &Pool<Sqlite>) -> AppResult<()> {
     sqlx::query!(
         r#"
             INSERT OR IGNORE INTO configuration (ROWID) VALUES (?1);
+            "#,
+        rowid
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn create_lastfm_row(pool: &Pool<Sqlite>) -> AppResult<()> {
+    let rowid = 1;
+    sqlx::query!(
+        r#"
+            INSERT OR IGNORE INTO lastfm (ROWID) VALUES (?1);
             "#,
         rowid
     )

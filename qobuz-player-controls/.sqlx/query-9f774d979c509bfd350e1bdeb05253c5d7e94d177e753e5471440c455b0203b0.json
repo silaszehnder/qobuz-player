@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT volume FROM volume\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "volume",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9f774d979c509bfd350e1bdeb05253c5d7e94d177e753e5471440c455b0203b0"
+}

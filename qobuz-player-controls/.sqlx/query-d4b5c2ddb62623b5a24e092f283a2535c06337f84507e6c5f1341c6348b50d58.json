@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT OR IGNORE INTO credentials (ROWID) VALUES (?1);\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "d4b5c2ddb62623b5a24e092f283a2535c06337f84507e6c5f1341c6348b50d58"
+}
