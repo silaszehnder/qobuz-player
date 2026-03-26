@@ -239,43 +239,58 @@ impl Player {
         });
     }
 
-    fn check_scrobble(&mut self) {
+    fn scrobble_finished_track(&mut self, track: &Track) {
+        // When a track finishes naturally, scrobble it (if eligible)
+        self.scrobble_if_eligible(track, track.duration_seconds as u64);
+    }
+
+    fn scrobble_if_eligible(&mut self, track: &Track, played_secs: u64) {
         let Some(ref lastfm) = self.lastfm else {
             return;
         };
 
-        let track = {
-            let tracklist = self.tracklist_rx.borrow();
-            tracklist.current_track().cloned()
-        };
-
-        let Some(track) = track else {
+        // Only scrobble if we were tracking this track and haven't already scrobbled it
+        if !self.scrobble_state.should_scrobble_on_finish(track.id) {
             return;
-        };
-
-        let position_secs = self.sink.position().as_secs();
-        let track_id = track.id;
-        let duration_secs = track.duration_seconds;
-
-        if self
-            .scrobble_state
-            .should_scrobble(track_id, position_secs, duration_secs)
-        {
-            tracing::info!(
-                "Last.fm: queueing scrobble for '{}' (played {}s of {}s)",
-                track.title,
-                position_secs,
-                duration_secs
-            );
-            self.scrobble_state.mark_scrobbled();
-            let timestamp = self.scrobble_state.start_timestamp();
-            let lastfm = lastfm.clone();
-            tokio::spawn(async move {
-                if let Err(e) = lastfm.scrobble(&track, timestamp).await {
-                    tracing::warn!("Failed to scrobble to Last.fm: {}", e);
-                }
-            });
         }
+
+        // Last.fm requires tracks to be at least 30 seconds long
+        if track.duration_seconds < 30 {
+            tracing::debug!(
+                "Last.fm: skipping scrobble for '{}' - track too short ({}s)",
+                track.title,
+                track.duration_seconds
+            );
+            return;
+        }
+
+        // Must have played at least 30 seconds or 50% of the track (whichever is less)
+        let min_play_time = (track.duration_seconds as u64 / 2).min(30);
+        if played_secs < min_play_time {
+            tracing::debug!(
+                "Last.fm: skipping scrobble for '{}' - only played {}s (need {}s)",
+                track.title,
+                played_secs,
+                min_play_time
+            );
+            return;
+        }
+
+        tracing::info!(
+            "Last.fm: scrobbling '{}' (played {}s of {}s)",
+            track.title,
+            played_secs,
+            track.duration_seconds
+        );
+        self.scrobble_state.mark_scrobbled();
+        let timestamp = self.scrobble_state.start_timestamp();
+        let lastfm = lastfm.clone();
+        let track = track.clone();
+        tokio::spawn(async move {
+            if let Err(e) = lastfm.scrobble(&track, timestamp).await {
+                tracing::warn!("Failed to scrobble to Last.fm: {}", e);
+            }
+        });
     }
 
     async fn set_volume(&self, volume: f32) -> AppResult<()> {
@@ -352,6 +367,12 @@ impl Player {
         {
             self.seek(Duration::default())?;
             return Ok(());
+        }
+
+        // Scrobble the current track if it played for at least 30 seconds
+        let played_secs = self.sink.position().as_secs();
+        if let Some(current_track) = tracklist.current_track() {
+            self.scrobble_if_eligible(current_track, played_secs);
         }
 
         self.position.send(Default::default())?;
@@ -605,8 +626,6 @@ impl Player {
         let position = self.sink.position();
         self.position.send(position)?;
 
-        // Check if we should scrobble
-        self.check_scrobble();
 
         let duration = self
             .tracklist_rx
@@ -695,6 +714,11 @@ impl Player {
 
     async fn track_finished(&mut self) -> AppResult<()> {
         let mut tracklist = self.tracklist_rx.borrow().clone();
+
+        // Scrobble the track that just finished
+        if let Some(finished_track) = tracklist.current_track() {
+            self.scrobble_finished_track(finished_track);
+        }
 
         let current_position = tracklist.current_position();
         let new_position = current_position + 1;

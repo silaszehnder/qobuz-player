@@ -289,21 +289,9 @@ impl ScrobbleState {
         self.current_track_id == Some(track_id) && !self.now_playing_sent
     }
 
-    pub fn should_scrobble(&self, track_id: u32, position_secs: u64, duration_secs: u32) -> bool {
-        if self.scrobbled || self.current_track_id != Some(track_id) {
-            return false;
-        }
-
-        // Last.fm requires: played for at least 4 minutes OR 50% of track (whichever is less)
-        // Also track must be at least 30 seconds long
-        if duration_secs < 30 {
-            return false;
-        }
-
-        let half_duration = (duration_secs / 2) as u64;
-        let scrobble_threshold = half_duration.min(240); // 4 minutes = 240 seconds
-
-        position_secs >= scrobble_threshold
+    pub fn should_scrobble_on_finish(&self, track_id: u32) -> bool {
+        // Scrobble if we were tracking this track and haven't already scrobbled it
+        self.current_track_id == Some(track_id) && !self.scrobbled
     }
 
     pub fn start_timestamp(&self) -> u64 {
