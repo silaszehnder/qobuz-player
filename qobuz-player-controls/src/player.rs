@@ -254,39 +254,44 @@ impl Player {
             return;
         }
 
-        // Last.fm requires tracks to be at least 30 seconds long
-        if track.duration_seconds < 30 {
-            tracing::debug!(
-                "Last.fm: skipping scrobble for '{}' - track too short ({}s)",
-                track.title,
-                track.duration_seconds
-            );
-            return;
-        }
+        // Mark as scrobbled immediately to prevent duplicate attempts
+        self.scrobble_state.mark_scrobbled();
 
-        // Must have played at least 30 seconds or 50% of the track (whichever is less)
-        let min_play_time = (track.duration_seconds as u64 / 2).min(30);
-        if played_secs < min_play_time {
-            tracing::debug!(
-                "Last.fm: skipping scrobble for '{}' - only played {}s (need {}s)",
+        let track = track.clone();
+        let lastfm = lastfm.clone();
+        let timestamp = self.scrobble_state.start_timestamp();
+
+        // Do all the checks and API call in the spawned task to avoid blocking
+        tokio::spawn(async move {
+            // Last.fm requires tracks to be at least 30 seconds long
+            if track.duration_seconds < 30 {
+                tracing::debug!(
+                    "Last.fm: skipping scrobble for '{}' - track too short ({}s)",
+                    track.title,
+                    track.duration_seconds
+                );
+                return;
+            }
+
+            // Must have played at least 30 seconds or 50% of the track (whichever is less)
+            let min_play_time = (track.duration_seconds as u64 / 2).min(30);
+            if played_secs < min_play_time {
+                tracing::debug!(
+                    "Last.fm: skipping scrobble for '{}' - only played {}s (need {}s)",
+                    track.title,
+                    played_secs,
+                    min_play_time
+                );
+                return;
+            }
+
+            tracing::info!(
+                "Last.fm: scrobbling '{}' (played {}s of {}s)",
                 track.title,
                 played_secs,
-                min_play_time
+                track.duration_seconds
             );
-            return;
-        }
 
-        tracing::info!(
-            "Last.fm: scrobbling '{}' (played {}s of {}s)",
-            track.title,
-            played_secs,
-            track.duration_seconds
-        );
-        self.scrobble_state.mark_scrobbled();
-        let timestamp = self.scrobble_state.start_timestamp();
-        let lastfm = lastfm.clone();
-        let track = track.clone();
-        tokio::spawn(async move {
             if let Err(e) = lastfm.scrobble(&track, timestamp).await {
                 tracing::warn!("Failed to scrobble to Last.fm: {}", e);
             }
