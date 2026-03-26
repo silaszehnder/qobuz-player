@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE lastfm\n            SET session_key=?1, username=?2, api_key=?3, api_secret=?4\n            WHERE ROWID = 1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "89e22394b65fb042a1d6ef867ada3a092e1073fd43622f32d5bdd424ae268564"
+}

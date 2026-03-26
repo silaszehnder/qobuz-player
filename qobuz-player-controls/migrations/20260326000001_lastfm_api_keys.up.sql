@@ -1,0 +1,2 @@
+ALTER TABLE lastfm ADD COLUMN api_key TEXT;
+ALTER TABLE lastfm ADD COLUMN api_secret TEXT;

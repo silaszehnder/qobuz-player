@@ -350,9 +350,14 @@ pub async fn run() -> Result<(), Error> {
 
             // Initialize Last.fm if enabled
             let lastfm_client = if lastfm {
-                match (lastfm_api_key, lastfm_api_secret) {
+                let lastfm_session = database.get_lastfm_session().await?;
+
+                // Use CLI args if provided, otherwise fall back to stored credentials
+                let api_key = lastfm_api_key.or(lastfm_session.api_key);
+                let api_secret = lastfm_api_secret.or(lastfm_session.api_secret);
+
+                match (api_key, api_secret) {
                     (Some(api_key), Some(api_secret)) => {
-                        let lastfm_session = database.get_lastfm_session().await?;
                         let lastfm = LastFm::new(api_key, api_secret, lastfm_session.session_key);
                         if lastfm.is_authenticated() {
                             tracing::info!(
@@ -368,7 +373,7 @@ pub async fn run() -> Result<(), Error> {
                     }
                     _ => {
                         tracing::warn!(
-                            "Last.fm enabled but API key/secret not provided. Use --lastfm-api-key and --lastfm-api-secret or set LASTFM_API_KEY and LASTFM_API_SECRET environment variables."
+                            "Last.fm enabled but API key/secret not configured. Run 'config lastfm-auth' first."
                         );
                         None
                     }
@@ -593,7 +598,7 @@ pub async fn run() -> Result<(), Error> {
                 api_key,
                 api_secret,
             } => {
-                let lastfm = LastFm::new(api_key, api_secret, None);
+                let lastfm = LastFm::new(api_key.clone(), api_secret.clone(), None);
 
                 // Step 1: Get auth token
                 println!("Getting Last.fm authentication token...");
@@ -617,9 +622,9 @@ pub async fn run() -> Result<(), Error> {
                         error: e.to_string(),
                     })?;
 
-                // Step 4: Save to database
+                // Step 4: Save to database (including api_key and api_secret)
                 database
-                    .set_lastfm_session(session_key, username.clone())
+                    .set_lastfm_session(session_key, username.clone(), api_key, api_secret)
                     .await?;
 
                 println!("Last.fm authentication successful! Logged in as: {}", username);

@@ -301,15 +301,19 @@ impl Database {
         &self,
         session_key: String,
         username: String,
+        api_key: String,
+        api_secret: String,
     ) -> AppResult<()> {
         sqlx::query!(
             r#"
             UPDATE lastfm
-            SET session_key=?1, username=?2
+            SET session_key=?1, username=?2, api_key=?3, api_secret=?4
             WHERE ROWID = 1
             "#,
             session_key,
-            username
+            username,
+            api_key,
+            api_secret
         )
         .execute(&self.pool)
         .await?;
@@ -320,7 +324,7 @@ impl Database {
         Ok(sqlx::query_as!(
             LastFmSession,
             r#"
-            SELECT session_key, username FROM lastfm
+            SELECT session_key, username, api_key, api_secret FROM lastfm
             WHERE ROWID = 1;
             "#
         )
@@ -384,6 +388,8 @@ pub struct DatabaseConfiguration {
 pub struct LastFmSession {
     pub session_key: Option<String>,
     pub username: Option<String>,
+    pub api_key: Option<String>,
+    pub api_secret: Option<String>,
 }
 
 #[derive(Debug, sqlx::FromRow, serde::Deserialize)]
