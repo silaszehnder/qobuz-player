@@ -6,6 +6,7 @@ use qobuz_player_controls::{
     AppResult, ExitSender, PositionReceiver, StatusReceiver, TracklistReceiver, client::Client,
     controls::Controls, error::Error, notification::NotificationBroadcast,
 };
+use tokio::try_join;
 use queue::QueueState;
 use ratatui::{prelude::*, widgets::*};
 use ui::center;
@@ -40,7 +41,19 @@ pub async fn init(
     let tracklist_value = tracklist_receiver.borrow().clone();
     let status_value = *status_receiver.borrow();
     let queue = tracklist_value.queue().into_iter().cloned().collect();
-    let now_playing = get_current_state(tracklist_value, status_value).await;
+
+    // Load TUI state in parallel for faster startup
+    let (now_playing, api_results) = tokio::join!(
+        get_current_state(tracklist_value, status_value),
+        async {
+            try_join!(
+                FavoritesState::new(&client),
+                discover::DiscoverState::new(&client),
+                genres::GenresState::new(&client),
+            )
+        }
+    );
+    let (favorites, discover, genres) = api_results?;
 
     let mut app = App {
         broadcast,
@@ -56,11 +69,11 @@ pub async fn init(
         should_draw: true,
         app_state: Default::default(),
         disable_tui_album_cover,
-        favorites: FavoritesState::new(&client).await?,
+        favorites,
         search: Default::default(),
         queue: QueueState::new(queue),
-        discover: discover::DiscoverState::new(&client).await?,
-        genres: genres::GenresState::new(&client).await?,
+        discover,
+        genres,
         client,
     };
 
