@@ -139,8 +139,10 @@ impl LastFm {
 
     pub async fn now_playing(&self, track: &Track) -> AppResult<()> {
         let Some(ref session_key) = self.session_key else {
+            tracing::debug!("Last.fm: skipping now_playing - no session key");
             return Ok(());
         };
+        tracing::debug!("Last.fm: sending now_playing for '{}'", track.title);
 
         let artist = track.artist_name.as_deref().unwrap_or("Unknown Artist");
         let album = track.album_title.as_deref().unwrap_or("");
@@ -175,8 +177,10 @@ impl LastFm {
         }
 
         let response = self.client.post(LASTFM_API_URL).form(&form_params).send().await?;
-
+        let status = response.status();
         let text = response.text().await?;
+
+        tracing::debug!("Last.fm now_playing response ({}): {}", status, text);
 
         if let Ok(error) = serde_json::from_str::<LastFmError>(&text) {
             tracing::warn!("Last.fm now playing error: {}", error.message);
@@ -191,8 +195,10 @@ impl LastFm {
 
     pub async fn scrobble(&self, track: &Track, timestamp: u64) -> AppResult<()> {
         let Some(ref session_key) = self.session_key else {
+            tracing::debug!("Last.fm: skipping scrobble - no session key");
             return Ok(());
         };
+        tracing::debug!("Last.fm: scrobbling '{}' with timestamp {}", track.title, timestamp);
 
         let artist = track.artist_name.as_deref().unwrap_or("Unknown Artist");
         let album = track.album_title.as_deref().unwrap_or("");
@@ -230,8 +236,10 @@ impl LastFm {
         }
 
         let response = self.client.post(LASTFM_API_URL).form(&form_params).send().await?;
-
+        let status = response.status();
         let text = response.text().await?;
+
+        tracing::debug!("Last.fm scrobble response ({}): {}", status, text);
 
         if let Ok(error) = serde_json::from_str::<LastFmError>(&text) {
             tracing::warn!("Last.fm scrobble error: {}", error.message);
