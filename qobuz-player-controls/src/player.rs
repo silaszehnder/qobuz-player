@@ -761,6 +761,58 @@ impl Player {
         Ok(())
     }
 
+    async fn cleanup_on_exit(&mut self) {
+        let Some(ref lastfm) = self.lastfm else {
+            return;
+        };
+
+        let track = {
+            let tracklist = self.tracklist_rx.borrow();
+            tracklist.current_track().cloned()
+        };
+
+        let Some(track) = track else {
+            return;
+        };
+
+        // Only process if we were tracking this track
+        if !self.scrobble_state.should_scrobble_on_finish(track.id) {
+            return;
+        }
+
+        let played_secs = self.sink.position().as_secs();
+
+        // Last.fm requires tracks to be at least 30 seconds long
+        if track.duration_seconds < 30 {
+            tracing::debug!("Last.fm: cleanup - track too short to scrobble");
+            return;
+        }
+
+        // Must have played at least 30 seconds or 50% of the track (whichever is less)
+        let min_play_time = (track.duration_seconds as u64 / 2).min(30);
+        if played_secs < min_play_time {
+            tracing::info!(
+                "Last.fm: cleanup - '{}' not played long enough to scrobble ({}s < {}s)",
+                track.title,
+                played_secs,
+                min_play_time
+            );
+            return;
+        }
+
+        tracing::info!(
+            "Last.fm: cleanup - scrobbling '{}' on exit (played {}s)",
+            track.title,
+            played_secs
+        );
+
+        let timestamp = self.scrobble_state.start_timestamp();
+        // Await the scrobble so it completes before exit
+        if let Err(e) = lastfm.scrobble(&track, timestamp).await {
+            tracing::warn!("Failed to scrobble on exit: {}", e);
+        }
+    }
+
     pub async fn player_loop(&mut self, mut exit_receiver: ExitReceiver) -> AppResult<()> {
         let mut interval = tokio::time::interval(Duration::from_millis(INTERVAL_MS));
 
@@ -786,6 +838,7 @@ impl Player {
 
                 Ok(exit) = exit_receiver.recv() => {
                     if exit {
+                        self.cleanup_on_exit().await;
                         break Ok(());
                     }
                 }
