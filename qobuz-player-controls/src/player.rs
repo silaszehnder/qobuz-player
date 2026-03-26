@@ -211,7 +211,7 @@ impl Player {
         } else {
             // Track is starting - update scrobble state and send now playing
             self.scrobble_state.track_changed(track.id);
-            self.send_now_playing(track).await;
+            self.send_now_playing(track);
         }
         self.sink.play();
         self.set_target_status(Status::Playing);
@@ -219,25 +219,32 @@ impl Player {
         Ok(())
     }
 
-    async fn send_now_playing(&mut self, track: &Track) {
+    fn send_now_playing(&mut self, track: &Track) {
         if let Some(ref lastfm) = self.lastfm
             && self.scrobble_state.should_send_now_playing(track.id)
         {
-            if let Err(e) = lastfm.now_playing(track).await {
-                tracing::warn!("Failed to send Last.fm now playing: {}", e);
-            } else {
-                self.scrobble_state.mark_now_playing_sent();
-            }
+            self.scrobble_state.mark_now_playing_sent();
+            let lastfm = lastfm.clone();
+            let track = track.clone();
+            tokio::spawn(async move {
+                if let Err(e) = lastfm.now_playing(&track).await {
+                    tracing::warn!("Failed to send Last.fm now playing: {}", e);
+                }
+            });
         }
     }
 
-    async fn check_scrobble(&mut self) {
+    fn check_scrobble(&mut self) {
         let Some(ref lastfm) = self.lastfm else {
             return;
         };
 
-        let tracklist = self.tracklist_rx.borrow();
-        let Some(track) = tracklist.current_track() else {
+        let track = {
+            let tracklist = self.tracklist_rx.borrow();
+            tracklist.current_track().cloned()
+        };
+
+        let Some(track) = track else {
             return;
         };
 
@@ -249,12 +256,14 @@ impl Player {
             .scrobble_state
             .should_scrobble(track_id, position_secs, duration_secs)
         {
+            self.scrobble_state.mark_scrobbled();
             let timestamp = self.scrobble_state.start_timestamp();
-            if let Err(e) = lastfm.scrobble(track, timestamp).await {
-                tracing::warn!("Failed to scrobble to Last.fm: {}", e);
-            } else {
-                self.scrobble_state.mark_scrobbled();
-            }
+            let lastfm = lastfm.clone();
+            tokio::spawn(async move {
+                if let Err(e) = lastfm.scrobble(&track, timestamp).await {
+                    tracing::warn!("Failed to scrobble to Last.fm: {}", e);
+                }
+            });
         }
     }
 
@@ -586,7 +595,7 @@ impl Player {
         self.position.send(position)?;
 
         // Check if we should scrobble
-        self.check_scrobble().await;
+        self.check_scrobble();
 
         let duration = self
             .tracklist_rx
@@ -696,7 +705,7 @@ impl Player {
                 } else {
                     // Track was already queued, update scrobble state for the new track
                     self.scrobble_state.track_changed(next_track.id);
-                    self.send_now_playing(next_track).await;
+                    self.send_now_playing(next_track);
                 }
             }
             None => {
